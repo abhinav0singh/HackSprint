@@ -4,8 +4,10 @@ import '../../core/theme.dart';
 import '../../models/goal_model.dart';
 import '../../providers/goal_provider.dart';
 import '../../providers/aggregate_provider.dart';
+import '../../providers/behavior_provider.dart';          // ← NEW
 import '../../widgets/total_progress_ring.dart';
 import '../../widgets/goal_summary_card.dart';
+import '../../widgets/intervention_banner.dart';           // ← NEW
 import '../goals/goal_detail_screen.dart';
 import '../goals/all_goals_screen.dart';
 
@@ -14,6 +16,7 @@ import '../goals/all_goals_screen.dart';
 //
 // - App bar: 'MoneyByte' + notification bell (v2 placeholder)
 // - Time-based greeting
+// - [NEW] InterventionBanner (shown when spending isAtRisk)
 // - TotalProgressRing (centred, large, with glow)
 // - Recovery Mode Banner (shown when overdue > 0)
 // - 'Your Goals' section + 'See all' link
@@ -32,8 +35,9 @@ class DashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final goalsAsync  = ref.watch(goalsProvider);
-    final aggregate   = ref.watch(aggregateProvider);
+    final goalsAsync = ref.watch(goalsProvider);
+    final aggregate  = ref.watch(aggregateProvider);
+    final report     = ref.watch(behaviorReportProvider); // ← NEW
 
     return Scaffold(
       backgroundColor: AppTheme.colorBackground,
@@ -63,7 +67,6 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ),
         actions: [
-          // Notification bell — v2 placeholder
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
             color: AppTheme.colorTextSecondary,
@@ -79,9 +82,7 @@ class DashboardScreen extends ConsumerWidget {
       ),
       body: goalsAsync.when(
         loading: () => const Center(
-          child: CircularProgressIndicator(
-            color: AppTheme.colorNeonGreen,
-          ),
+          child: CircularProgressIndicator(color: AppTheme.colorNeonGreen),
         ),
         error: (e, _) => const Center(
           child: Text('Error loading goals', style: AppTheme.bodyMedium),
@@ -90,6 +91,15 @@ class DashboardScreen extends ConsumerWidget {
           goals: goals,
           aggregate: aggregate,
           greeting: _greeting(),
+          // ── NEW: pass report data down ──
+          isAtRisk: report.isAtRisk,
+          overallMessage: report.overallMessage,
+          onSeeSpendingDetails: () {
+            // Write to the shared tab-index provider so ShellScreen
+            // switches to the Analytics tab (index 2).
+            // ➜ See INTEGRATION_INSTRUCTIONS.txt for shell_screen wiring.
+            ref.read(shellTabIndexProvider.notifier).state = 2;
+          },
         ),
       ),
     );
@@ -101,62 +111,86 @@ class _DashboardBody extends StatelessWidget {
     required this.goals,
     required this.aggregate,
     required this.greeting,
+    // ── NEW params ──
+    required this.isAtRisk,
+    required this.overallMessage,
+    required this.onSeeSpendingDetails,
   });
 
   final List<Goal> goals;
   final AggregateData aggregate;
   final String greeting;
+  final bool isAtRisk;                       // ← NEW
+  final String overallMessage;               // ← NEW
+  final VoidCallback onSeeSpendingDetails;   // ← NEW
 
   @override
   Widget build(BuildContext context) {
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Greeting
-                Text(
-                  greeting,
-                  style: AppTheme.bodyMedium.copyWith(
-                    fontSize: 20,
-                    color: const Color(0xFFB0B8C8),
-                  ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── NEW: Intervention Banner (above everything else) ──────
+              // Dismissible, resets weekly, amber style, non-blocking.
+              if (isAtRisk)
+                InterventionBanner(
+                  message: overallMessage,
+                  onSeeDetails: onSeeSpendingDetails,
                 ),
-                const SizedBox(height: 24),
+              // ─────────────────────────────────────────────────────────
 
-                // Total Progress Ring — centred
-                const Center(child: TotalProgressRing()),
-                const SizedBox(height: 20),
-
-                // Recovery Mode Banner (shown when ≥1 goal is overdue)
-                if (aggregate.overdueCount > 0)
-                  _RecoveryBanner(overdueCount: aggregate.overdueCount),
-
-                const SizedBox(height: 24),
-
-                // Section header
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Your Goals', style: AppTheme.headlineMedium.copyWith(fontSize: 20)),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const AllGoalsScreen(),
-                          ),
-                        );
-                      },
-                      child: const Text('See all'),
+                    // Greeting
+                    Text(
+                      greeting,
+                      style: AppTheme.bodyMedium.copyWith(
+                        fontSize: 20,
+                        color: const Color(0xFFB0B8C8),
+                      ),
                     ),
+                    const SizedBox(height: 24),
+
+                    // Total Progress Ring — centred
+                    const Center(child: TotalProgressRing()),
+                    const SizedBox(height: 20),
+
+                    // Recovery Mode Banner (shown when ≥1 goal is overdue)
+                    if (aggregate.overdueCount > 0)
+                      _RecoveryBanner(overdueCount: aggregate.overdueCount),
+
+                    const SizedBox(height: 24),
+
+                    // Section header
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Your Goals',
+                          style: AppTheme.headlineMedium.copyWith(fontSize: 20),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const AllGoalsScreen(),
+                              ),
+                            );
+                          },
+                          child: const Text('See all'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
                   ],
                 ),
-                const SizedBox(height: 8),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
 
@@ -192,7 +226,7 @@ class _DashboardBody extends StatelessWidget {
   }
 }
 
-// ── Recovery Mode Banner (PRD §5.2) ──────────────────────
+// ── Recovery Mode Banner (PRD §5.2) — UNCHANGED ──────────
 class _RecoveryBanner extends StatelessWidget {
   const _RecoveryBanner({required this.overdueCount});
   final int overdueCount;
@@ -237,7 +271,7 @@ class _RecoveryBanner extends StatelessWidget {
   }
 }
 
-// ── Empty state hint (when no goals exist) ───────────────
+// ── Empty state hint (when no goals exist) — UNCHANGED ───
 class _EmptyGoalsHint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -260,10 +294,7 @@ class _EmptyGoalsHint extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text(
-                'Tap the ',
-                style: AppTheme.bodyMedium,
-              ),
+              const Text('Tap the ', style: AppTheme.bodyMedium),
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
@@ -276,10 +307,7 @@ class _EmptyGoalsHint extends StatelessWidget {
                   size: 16,
                 ),
               ),
-              const Text(
-                ' button below',
-                style: AppTheme.bodyMedium,
-              ),
+              const Text(' button below', style: AppTheme.bodyMedium),
             ],
           ),
         ],

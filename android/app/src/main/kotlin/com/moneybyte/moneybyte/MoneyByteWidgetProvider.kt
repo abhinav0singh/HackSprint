@@ -32,9 +32,20 @@ class MoneyByteWidgetProvider : AppWidgetProvider() {
             )
             val snapshotJson = prefs.getString("flutter.moneybyte_widget_snapshot", null)
 
+            // ── NEW: read savings rate for ring color ─────────────────────
+            // Written by behavior_provider.dart via SharedPreferences.
+            // Green  ≥ 20% | Yellow 10–20% | Red < 10%
+            val savingsRate = prefs.getFloat("flutter.moneybyte_savings_rate", -1f)
+            val ringColor = when {
+                savingsRate < 0f    -> "#00E676" // default green (no data yet)
+                savingsRate >= 0.20 -> "#00E676" // 🟢 on track
+                savingsRate >= 0.10 -> "#FF9800" // 🟡 caution
+                else                -> "#E53935" // 🔴 critical
+            }
+            // ─────────────────────────────────────────────────────────────
+
             var percent = 0.0f
             var savedText = "INR 0"
-            var targetText = "INR 0"
             var goalCount = 0
 
             if (snapshotJson != null) {
@@ -42,17 +53,14 @@ class MoneyByteWidgetProvider : AppWidgetProvider() {
                     val json = JSONObject(snapshotJson)
                     percent = json.getDouble("totalPercent").toFloat()
                     val saved = json.getDouble("totalSaved")
-                    val target = json.getDouble("totalTarget")
                     goalCount = json.getInt("goalCount")
                     savedText = formatInr(saved)
-                    targetText = formatInr(target)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
             }
 
-            // Draw ring bitmap
-            val ringBitmap = drawRing(percent)
+            val ringBitmap = drawRing(percent, ringColor) // ← pass color
 
             val views = RemoteViews(context.packageName, R.layout.moneybyte_widget)
             views.setImageViewBitmap(R.id.widget_ring, ringBitmap)
@@ -63,7 +71,8 @@ class MoneyByteWidgetProvider : AppWidgetProvider() {
             appWidgetManager.updateAppWidget(appWidgetId, views)
         }
 
-        private fun drawRing(percent: Float): Bitmap {
+        // ── drawRing now accepts a color string ───────────────────────────
+        private fun drawRing(percent: Float, colorHex: String = "#00E676"): Bitmap {
             val size = 160
             val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
@@ -81,10 +90,10 @@ class MoneyByteWidgetProvider : AppWidgetProvider() {
             }
             canvas.drawOval(rect, trackPaint)
 
-            // Progress arc
+            // Progress arc — color reflects financial state
             if (percent > 0f) {
                 val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.parseColor("#00E676")
+                    color = Color.parseColor(colorHex)
                     style = Paint.Style.STROKE
                     this.strokeWidth = strokeWidth
                     strokeCap = Paint.Cap.ROUND
@@ -99,8 +108,8 @@ class MoneyByteWidgetProvider : AppWidgetProvider() {
         private fun formatInr(amount: Double): String {
             return when {
                 amount >= 1_00_00_000 -> "₹${String.format("%.1f", amount / 1_00_00_000)}Cr"
-                amount >= 1_00_000 -> "₹${String.format("%.1f", amount / 1_00_000)}L"
-                else -> "₹${amount.toLong()}"
+                amount >= 1_00_000    -> "₹${String.format("%.1f", amount / 1_00_000)}L"
+                else                  -> "₹${amount.toLong()}"
             }
         }
     }

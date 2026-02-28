@@ -5,6 +5,9 @@ import '../../core/constants.dart';
 import '../../models/goal_model.dart';
 import '../../providers/goal_provider.dart';
 import '../../providers/aggregate_provider.dart';
+import '../../providers/behavior_provider.dart';
+import '../../widgets/spending_analytics_section.dart';
+import '../../widgets/transactions_bottom_sheet.dart';   // ← NEW
 import '../goals/goal_detail_screen.dart';
 
 // ─────────────────────────────────────────────────────────
@@ -13,6 +16,8 @@ import '../goals/goal_detail_screen.dart';
 // Overview Tab:
 //   2x2 stat grid: Total Saved, Total Target, Active Goals, Completed
 //   Fifth stat (full width): Overdue count (amber when > 0)
+//   [NEW] SpendingAnalyticsSection: breakdown bars, intervention
+//         cards, 6-month projection chart
 //
 // Per Goal Tab:
 //   Vertical bar chart (CustomPaint) showing each goal's % progress
@@ -21,6 +26,8 @@ import '../goals/goal_detail_screen.dart';
 //   - Closest to Completion
 //   - Needs Attention (urgencyScore formula §7.4, Fix #14 guard)
 //   - Recovery Needed (list of overdue goals, hidden if none)
+//
+// [NEW] AppBar action: receipt icon → opens TransactionsBottomSheet
 // ─────────────────────────────────────────────────────────
 
 class AnalyticsScreen extends ConsumerStatefulWidget {
@@ -52,6 +59,16 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
       backgroundColor: AppTheme.colorBackground,
       appBar: AppBar(
         title: const Text('Analytics'),
+        // ── NEW: transactions button ──────────────────────
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.receipt_long_outlined),
+            color: AppTheme.colorNeonGreen,
+            tooltip: 'Manage Transactions',
+            onPressed: () => showTransactionsSheet(context),
+          ),
+        ],
+        // ─────────────────────────────────────────────────
         bottom: TabBar(
           controller: _tabController,
           labelColor: AppTheme.colorNeonGreen,
@@ -84,16 +101,15 @@ class _OverviewTab extends ConsumerWidget {
     final active     = ref.watch(activeGoalsProvider);
     final completed  = ref.watch(completedGoalsProvider);
     final overdue    = ref.watch(overdueGoalsProvider);
-    final goals      = ref.watch(goalsProvider).value ?? [];
+    final report     = ref.watch(behaviorReportProvider);
 
-    // Insights
     final closestGoal    = _findClosestToCompletion(active);
     final needsAttention = _findNeedsAttention(active);
 
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        // 2×2 Stat grid
+        // 2×2 Stat grid — UNCHANGED
         GridView.count(
           crossAxisCount: 2,
           mainAxisSpacing: 12,
@@ -126,7 +142,7 @@ class _OverviewTab extends ConsumerWidget {
         ),
         const SizedBox(height: 12),
 
-        // Fifth stat: Overdue (full width, amber when > 0)
+        // Fifth stat: Overdue — UNCHANGED
         _StatCard(
           label: 'Overdue Goals',
           value: overdue.length.toString(),
@@ -140,19 +156,18 @@ class _OverviewTab extends ConsumerWidget {
         const Text('Insights', style: AppTheme.titleLarge),
         const SizedBox(height: 16),
 
-        // Closest to Completion
+        // Closest to Completion — UNCHANGED
         if (closestGoal != null)
           _InsightCard(
             icon: Icons.emoji_events_outlined,
             title: 'Closest to Completion',
             subtitle: closestGoal.title,
-            value:
-                '${(closestGoal.progressPercent * 100).round()}% complete',
+            value: '${(closestGoal.progressPercent * 100).round()}% complete',
             goal: closestGoal,
             color: AppTheme.colorNeonGreen,
           ),
 
-        // Needs Attention (urgencyScore — Fix #14)
+        // Needs Attention — UNCHANGED
         if (needsAttention != null)
           _InsightCard(
             icon: Icons.priority_high,
@@ -165,7 +180,7 @@ class _OverviewTab extends ConsumerWidget {
             color: AppTheme.colorRecoveryAmber,
           ),
 
-        // Recovery Needed (hidden if none)
+        // Recovery Needed — UNCHANGED
         if (overdue.isNotEmpty) ...[
           const SizedBox(height: 8),
           Container(
@@ -195,32 +210,27 @@ class _OverviewTab extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-                ...overdue.map(
-                  (g) => _RecoveryGoalRow(goal: g),
-                ),
+                ...overdue.map((g) => _RecoveryGoalRow(goal: g)),
               ],
             ),
           ),
         ],
 
-        const SizedBox(height: 32),
+        // ── Behavioral Spending Section — UNCHANGED ───────
+        SpendingAnalyticsSection(report: report),
       ],
     );
   }
 
-  // Closest to completion (highest progressPercent, not yet complete)
   Goal? _findClosestToCompletion(List<Goal> active) {
     if (active.isEmpty) return null;
     Goal? best;
     for (final g in active) {
-      if (best == null || g.progressPercent > best.progressPercent) {
-        best = g;
-      }
+      if (best == null || g.progressPercent > best.progressPercent) best = g;
     }
     return best;
   }
 
-  // Needs Attention (urgencyScore §7.4, Fix #14)
   Goal? _findNeedsAttention(List<Goal> active) {
     final eligible = active.where((g) => g.targetDate != null).toList();
     if (eligible.isEmpty) return null;
@@ -229,22 +239,19 @@ class _OverviewTab extends ConsumerWidget {
     );
   }
 
-  /// urgencyScore (PRD §7.4, Fix #14).
-  /// Returns 0.0 for goals without deadline, completed, overdue,
-  /// or when days <= 0.
   double _urgencyScore(Goal g) {
     if (g.targetDate == null) return 0.0;
     if (g.isCompleted) return 0.0;
-    if (g.isOverdue) return 0.0;  // excluded per PRD §7.4
+    if (g.isOverdue) return 0.0;
     final days = g.daysRemaining ?? 0;
-    if (days <= 0) return 0.0;    // Fix #14 guard
-    final progress = g.progressPercent;  // already clamped 0..1
+    if (days <= 0) return 0.0;
+    final progress = g.progressPercent;
     final pressure = 1.0 / (days + 1);
     return (1.0 - progress) * pressure;
   }
 }
 
-// ── Per Goal Tab ─────────────────────────────────────────
+// ── Per Goal Tab — UNCHANGED ──────────────────────────────
 class _PerGoalTab extends ConsumerWidget {
   const _PerGoalTab();
 
@@ -254,20 +261,14 @@ class _PerGoalTab extends ConsumerWidget {
 
     if (goals.isEmpty) {
       return const Center(
-        child: Text(
-          'No goals to display.',
-          style: AppTheme.bodyMedium,
-        ),
+        child: Text('No goals to display.', style: AppTheme.bodyMedium),
       );
     }
 
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        const Text(
-          'Progress by Goal',
-          style: AppTheme.titleLarge,
-        ),
+        const Text('Progress by Goal', style: AppTheme.titleLarge),
         const SizedBox(height: 20),
         SizedBox(
           height: 260,
@@ -276,14 +277,13 @@ class _PerGoalTab extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 32),
-        // Goal list with individual % bars
         ...goals.map((g) => _GoalProgressRow(goal: g)),
       ],
     );
   }
 }
 
-// ── Sub-widgets ───────────────────────────────────────────
+// ── Sub-widgets — ALL UNCHANGED ───────────────────────────
 
 class _StatCard extends StatelessWidget {
   const _StatCard({
@@ -503,7 +503,7 @@ class _GoalProgressRow extends StatelessWidget {
   }
 }
 
-// ── Bar Chart (CustomPaint) ───────────────────────────────
+// ── Bar Chart (CustomPaint) — UNCHANGED ──────────────────
 class _BarChartPainter extends CustomPainter {
   const _BarChartPainter({required this.goals});
   final List<Goal> goals;
@@ -517,11 +517,11 @@ class _BarChartPainter extends CustomPainter {
     final maxH     = size.height - 40;
 
     for (var i = 0; i < goals.length; i++) {
-      final g      = goals[i];
-      final pct    = g.progressPercent;
-      final barH   = maxH * pct;
-      final x      = i * spacing + (spacing - barWidth) / 2;
-      final y      = size.height - 30 - barH;
+      final g    = goals[i];
+      final pct  = g.progressPercent;
+      final barH = maxH * pct;
+      final x    = i * spacing + (spacing - barWidth) / 2;
+      final y    = size.height - 30 - barH;
 
       final color = g.isOverdue
           ? AppTheme.colorRecoveryAmber
@@ -529,7 +529,6 @@ class _BarChartPainter extends CustomPainter {
               ? AppTheme.colorNeonGreen
               : hexToColor(g.accentColorHex);
 
-      // Background bar
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromLTWH(x, size.height - 30 - maxH, barWidth, maxH),
@@ -538,7 +537,6 @@ class _BarChartPainter extends CustomPainter {
         Paint()..color = AppTheme.colorSurface,
       );
 
-      // Filled bar
       if (barH > 0) {
         canvas.drawRRect(
           RRect.fromRectAndRadius(
@@ -549,11 +547,9 @@ class _BarChartPainter extends CustomPainter {
         );
       }
 
-      // Percent label
-      final pctLabel = '${(pct * 100).round()}%';
       final tp = TextPainter(
         text: TextSpan(
-          text: pctLabel,
+          text: '${(pct * 100).round()}%',
           style: const TextStyle(
             fontFamily: 'Inter',
             fontSize: 9,
@@ -562,10 +558,7 @@ class _BarChartPainter extends CustomPainter {
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      tp.paint(
-        canvas,
-        Offset(x + (barWidth - tp.width) / 2, y - 14),
-      );
+      tp.paint(canvas, Offset(x + (barWidth - tp.width) / 2, y - 14));
     }
   }
 
