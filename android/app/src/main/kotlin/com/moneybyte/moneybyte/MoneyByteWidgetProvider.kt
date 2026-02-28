@@ -32,10 +32,16 @@ class MoneyByteWidgetProvider : AppWidgetProvider() {
             )
             val snapshotJson = prefs.getString("flutter.moneybyte_widget_snapshot", null)
 
-            // ── NEW: read savings rate for ring color ─────────────────────
-            // Written by behavior_provider.dart via SharedPreferences.
-            // Green  ≥ 20% | Yellow 10–20% | Red < 10%
-            val savingsRate = prefs.getFloat("flutter.moneybyte_savings_rate", -1f)
+            // ── Read savings rate for ring color ──────────────────────────
+            // Flutter stores SharedPreferences values as Strings on Android.
+            // Must read as String and parse — getFloat() crashes with ClassCastException.
+            val savingsRate: Float = try {
+                prefs.getString("flutter.moneybyte_savings_rate", null)
+                    ?.toFloatOrNull() ?: -1f
+            } catch (e: Exception) {
+                -1f
+            }
+
             val ringColor = when {
                 savingsRate < 0f    -> "#00E676" // default green (no data yet)
                 savingsRate >= 0.20 -> "#00E676" // 🟢 on track
@@ -60,7 +66,7 @@ class MoneyByteWidgetProvider : AppWidgetProvider() {
                 }
             }
 
-            val ringBitmap = drawRing(percent, ringColor) // ← pass color
+            val ringBitmap = drawRing(percent, ringColor)
 
             val views = RemoteViews(context.packageName, R.layout.moneybyte_widget)
             views.setImageViewBitmap(R.id.widget_ring, ringBitmap)
@@ -71,7 +77,6 @@ class MoneyByteWidgetProvider : AppWidgetProvider() {
             appWidgetManager.updateAppWidget(appWidgetId, views)
         }
 
-        // ── drawRing now accepts a color string ───────────────────────────
         private fun drawRing(percent: Float, colorHex: String = "#00E676"): Bitmap {
             val size = 160
             val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -81,7 +86,6 @@ class MoneyByteWidgetProvider : AppWidgetProvider() {
             val padding = strokeWidth / 2 + 4f
             val rect = RectF(padding, padding, size - padding, size - padding)
 
-            // Background track
             val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2A2D36")
                 style = Paint.Style.STROKE
@@ -90,7 +94,6 @@ class MoneyByteWidgetProvider : AppWidgetProvider() {
             }
             canvas.drawOval(rect, trackPaint)
 
-            // Progress arc — color reflects financial state
             if (percent > 0f) {
                 val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.parseColor(colorHex)
